@@ -21,30 +21,18 @@ import math
 
 
 class Mlp(nn.Module):
-    """MLP with optional gating (SwiGLU-like)"""
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0., gated=False):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
-        self.gated = gated
-        if gated:
-            self.fc1 = nn.Linear(in_features, hidden_features)
-            self.fc1_gate = nn.Linear(in_features, hidden_features)
-        else:
-            self.fc1 = nn.Linear(in_features, hidden_features)
-            self.fc1_gate = None
+        self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
-        if self.gated:
-            x1 = self.fc1(x)
-            x2 = self.fc1_gate(x)
-            x = self.act(x2) * x1
-        else:
-            x = self.fc1(x)
-            x = self.act(x)
+        x = self.fc1(x)
+        x = self.act(x)
         x = self.drop(x)
         x = self.fc2(x)
         x = self.drop(x)
@@ -101,7 +89,7 @@ class Attention(nn.Module):
 class Block(nn.Module):
     
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, layerscale_init_value=0.0, gated_mlp=False):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
@@ -110,27 +98,12 @@ class Block(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop, gated=gated_mlp)
-        # LayerScale (https://arxiv.org/abs/2103.17239)
-        self.use_layerscale = layerscale_init_value > 0
-        if self.use_layerscale:
-            self.gamma_1 = nn.Parameter(layerscale_init_value * torch.ones(dim))
-            self.gamma_2 = nn.Parameter(layerscale_init_value * torch.ones(dim))
-        else:
-            self.gamma_1 = None
-            self.gamma_2 = None
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
         x2, atten = self.attn(self.norm1(x))
-        if self.use_layerscale:
-            x = x + self.drop_path(self.gamma_1 * x2)
-        else:
-            x = x + self.drop_path(x2)
-        m = self.mlp(self.norm2(x))
-        if self.use_layerscale:
-            x = x + self.drop_path(self.gamma_2 * m)
-        else:
-            x = x + self.drop_path(m)
+        x = x + self.drop_path(x2)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, atten
 
 
@@ -141,8 +114,7 @@ class CFVisionTransformer(nn.Module):
     """
     def __init__(self, img_size_list=[112, 224], patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm,
-                 layerscale_init_value=0.0, gated_mlp=False, use_checkpoint=False):
+                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm):
         super().__init__()
         self.informative_selection = False
         self.alpha = 0.5
@@ -168,11 +140,9 @@ class CFVisionTransformer(nn.Module):
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-                layerscale_init_value=layerscale_init_value, gated_mlp=gated_mlp)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
-        self.use_checkpoint = use_checkpoint
 
         # NOTE as per official impl, we could have a pre-logits representation dense layer + tanh here
         #self.repr = nn.Linear(embed_dim, representation_size)
@@ -231,10 +201,7 @@ class CFVisionTransformer(nn.Module):
         x = self.pos_drop(x)
         embedding_x1 = x
         for index,blk in enumerate(self.blocks):
-            if self.use_checkpoint:
-                x, atten = torch.utils.checkpoint.checkpoint(blk, x)
-            else:
-                x, atten = blk(x)
+            x, atten = blk(x)
             if index in self.target_index:
                 global_attention = self.beta*global_attention + (1-self.beta)*atten
         x = self.norm(x)
@@ -274,10 +241,7 @@ class CFVisionTransformer(nn.Module):
         
         x = self.pos_drop(x)
         for blk in self.blocks:
-            if self.use_checkpoint:
-                x, _ = torch.utils.checkpoint.checkpoint(blk, x)
-            else:
-                x, _ = blk(x)
+            x, _ = blk(x)
         x = self.norm(x)
         results.append(self.head(x[:, 0]))
 
@@ -297,10 +261,7 @@ class CFVisionTransformer(nn.Module):
         x = self.pos_drop(x)
         embedding_x1 = x
         for index,blk in enumerate(self.blocks):
-            if self.use_checkpoint:
-                x, atten = torch.utils.checkpoint.checkpoint(blk, x)
-            else:
-                x, atten = blk(x)
+            x, atten = blk(x)
             if index in target_index:
                 global_attention = alpha*global_attention + (1-alpha)*atten
         x = self.norm(x)
@@ -343,10 +304,7 @@ class CFVisionTransformer(nn.Module):
                 
         x = self.pos_drop(x)
         for blk in self.blocks:
-            if self.use_checkpoint:
-                x, _ = torch.utils.checkpoint.checkpoint(blk, x)
-            else:
-                x, _ = blk(x)
+            x, _ = blk(x)
         x = self.norm(x)
         fine_result = self.head(x[:, 0])
         coarse_result[no_exit] = fine_result
@@ -360,23 +318,3 @@ def cf_deit_small(pretrained=False, **kwargs):
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
-
-@register_model
-def cf_deit_small_plus(pretrained=False, **kwargs):
-    """Enhanced variant: LayerScale + gated MLP + optional checkpointing"""
-    default_kwargs = dict(
-        patch_size=16,
-        embed_dim=384,
-        depth=12,
-        num_heads=6,
-        mlp_ratio=4,
-        qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6),
-        layerscale_init_value=1e-5,
-        gated_mlp=True,
-        use_checkpoint=False,
-    )
-    default_kwargs.update(kwargs)
-    model = CFVisionTransformer(**default_kwargs)
-    return model
-
