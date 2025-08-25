@@ -73,26 +73,26 @@ ImageNet
 ## Evaluate Pre-trained Models
 - Get accuracy of each stage
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 0 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 0 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
 
 ```
 
 - Infer the model on the validation set with various threshold([0.01:1:0.01])
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 1 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 1 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
 
 ```
 
 - Infer the model on the validation set with one threshold and meature the throughput
 
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 2 --data_url PATH_TO_IMAGENET  --batch_size 1024 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} --threshold THRESHOLD
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 2 --data_url PATH_TO_IMAGENET  --batch_size 1024 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} --threshold THRESHOLD
 
 ```
 
 - Read the evaluation results saved in pre-trained models
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 3 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 3 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
 
 ```
 
