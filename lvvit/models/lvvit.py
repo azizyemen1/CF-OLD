@@ -10,6 +10,7 @@ import math
 
 from .layers import *
 from utils import batch_index_select,get_index
+from modules.cfi import CoarseFineInteraction
 
 
 
@@ -87,7 +88,8 @@ class CF_LV_ViT(nn.Module):
     def __init__(self, img_size_list = [112,224], patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., drop_path_decay='linear', hybrid_backbone=None, norm_layer=nn.LayerNorm, p_emb='4_2', head_dim = None,
-                 skip_lam = 1.0,order=None, mix_token=False, return_dense=False):
+                 skip_lam = 1.0,order=None, mix_token=False, return_dense=False,
+                 cfi_num_heads=None, cfi_drop=0.):
         super().__init__()
 
         self.informative_selection = False
@@ -112,6 +114,10 @@ class CF_LV_ViT(nn.Module):
         self.pos_embed_list = [nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim)) for num_patches in self.num_patches_list]
         self.pos_embed_list = nn.ParameterList(self.pos_embed_list)
         self.pos_drop = nn.Dropout(p=drop_rate)
+
+        cfi_heads = cfi_num_heads or num_heads
+        self.cfi = CoarseFineInteraction(embed_dim, num_heads=cfi_heads, qkv_bias=qkv_bias,
+                                         attn_drop=cfi_drop, proj_drop=cfi_drop)
 
         if order is None:
             dpr=get_dpr(drop_path_rate, depth, drop_path_decay)
@@ -245,6 +251,20 @@ class CF_LV_ViT(nn.Module):
         x = x+feature_temp
         x = x + self.pos_embed_list[1]
         embedding_fine = x
+        if self.informative_selection:
+            cls_attn = global_attention.mean(dim=1)[:,0,1:]
+            import_token_num = math.ceil(self.alpha * self.patch_embed.num_patches_list[0])
+            policy_index = torch.argsort(cls_attn, dim=1, descending=True)
+            patch_unimportan_index = policy_index[:, import_token_num:]
+            important_index = policy_index[:, :import_token_num]
+            unimportan_tokens = batch_index_select(embedding_coarse, patch_unimportan_index+1)
+            patch_important_index = get_index(important_index,image_size=self.img_size_list[1])
+            cls_index = torch.zeros((B,1)).cuda().long()
+            important_index = torch.cat((cls_index, patch_important_index+1), dim=1)
+            important_tokens = batch_index_select(embedding_fine, important_index)
+            x = torch.cat((important_tokens, unimportan_tokens), dim=1)
+
+        x = x + self.cfi(x, self.first_stage_output)
         x = self.pos_drop(x)
 
         if not self.informative_selection:
@@ -269,17 +289,6 @@ class CF_LV_ViT(nn.Module):
             else:
                 results.append(x_cls)
         else:
-            cls_attn = global_attention.mean(dim=1)[:,0,1:]
-            import_token_num = math.ceil(self.alpha * self.patch_embed.num_patches_list[0])
-            policy_index = torch.argsort(cls_attn, dim=1, descending=True)
-            patch_unimportan_index = policy_index[:, import_token_num:]
-            important_index = policy_index[:, :import_token_num]
-            unimportan_tokens = batch_index_select(embedding_coarse, patch_unimportan_index+1)
-            patch_important_index = get_index(important_index,image_size=self.img_size_list[1])
-            cls_index = torch.zeros((B,1)).cuda().long()
-            important_index = torch.cat((cls_index, patch_important_index+1), dim=1)
-            important_tokens = batch_index_select(embedding_fine, important_index)
-            x = torch.cat((important_tokens, unimportan_tokens), dim=1)
             for blk in self.blocks:
                 x,_ = blk(x)
             x = self.norm(x)

@@ -18,6 +18,7 @@ from timm.models.layers import trunc_normal_
 from utils import batch_index_select,get_index
 import numpy as np
 import math
+from modules.cfi import CoarseFineInteraction
 
 
 class Mlp(nn.Module):
@@ -142,7 +143,8 @@ class CFVisionTransformer(nn.Module):
     def __init__(self, img_size_list=[112, 224], patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm,
-                 layerscale_init_value=0.0, gated_mlp=False, use_checkpoint=False):
+                 layerscale_init_value=0.0, gated_mlp=False, use_checkpoint=False,
+                 cfi_num_heads=None, cfi_drop=0.):
         super().__init__()
         self.informative_selection = False
         self.alpha = 0.5
@@ -163,6 +165,10 @@ class CFVisionTransformer(nn.Module):
         self.pos_embed_list = [nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim)) for num_patches in num_patches_list]
         self.pos_embed_list = nn.ParameterList(self.pos_embed_list)
         self.pos_drop = nn.Dropout(p=drop_rate)
+
+        cfi_heads = cfi_num_heads or num_heads
+        self.cfi = CoarseFineInteraction(embed_dim, num_heads=cfi_heads, qkv_bias=qkv_bias,
+                                         attn_drop=cfi_drop, proj_drop=cfi_drop)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
@@ -258,8 +264,9 @@ class CFVisionTransformer(nn.Module):
         
         x = x+feature_temp      # shortcut
         embedding_x2 = x + self.pos_embed_list[1]
+        x = embedding_x2
         if self.informative_selection:
-            cls_attn = global_attention.mean(dim=1)[:,0,1:] 
+            cls_attn = global_attention.mean(dim=1)[:,0,1:]
             import_token_num = math.ceil(self.alpha * self.patch_embed.num_patches_list[0])
             policy_index = torch.argsort(cls_attn, dim=1, descending=True)
             unimportan_index = policy_index[:, import_token_num:]
@@ -271,7 +278,8 @@ class CFVisionTransformer(nn.Module):
             important_index = torch.cat((cls_index, important_index+1), dim=1)
             important_tokens = batch_index_select(embedding_x2, important_index)
             x = torch.cat((important_tokens, unimportan_tokens), dim=1)
-        
+
+        x = x + self.cfi(x, self.first_stage_output)
         x = self.pos_drop(x)
         for blk in self.blocks:
             if self.use_checkpoint:
