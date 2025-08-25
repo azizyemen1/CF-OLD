@@ -22,10 +22,37 @@ This is Pytorch implementation of our paper "[CF-ViT: A General Coarse-to-Fine M
 
 ```
 ## Requirements
-- python 3.9.7
-- pytorch 1.10.1
-- torchvision 0.11.2
-- apex 
+- python 3.10+
+- pytorch 2.2+
+- torchvision 0.17+
+- apex (optional for mixed precision)
+
+Quickstart (choose one):
+
+1) Pip (CPU by default)
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt
+PYTHONPATH=. python dynamic_inference.py -h
+```
+
+2) Conda/Mamba
+
+```
+mamba env create -f environment.yml
+conda activate cf-vit
+PYTHONPATH=. python dynamic_inference.py -h
+```
+
+3) Docker (CPU)
+
+```
+docker build -t cf-vit:cpu .
+docker run --rm -it -v $PWD:/app cf-vit:cpu python dynamic_inference.py -h
+```
 
 
 ## Data Preparation
