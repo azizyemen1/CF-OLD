@@ -1,0 +1,22 @@
+name: cf-vit
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pytorch=2.2.*
+  - torchvision=0.17.*
+  - torchaudio=2.2.*
+  - cpuonly  # remove if using CUDA, or replace with cudatoolkit
+  - numpy>=1.22
+  - pillow>=9.0
+  - tqdm>=4.62
+  - matplotlib>=3.5
+  - scipy>=1.8
+  - scikit-learn>=1.0
+  - tensorboard>=2.9
+  - pip
+  - pip:
+      - opencv-python>=4.5
+      - pyyaml>=6.0

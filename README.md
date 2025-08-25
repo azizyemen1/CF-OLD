@@ -22,10 +22,37 @@ This is Pytorch implementation of our paper "[CF-ViT: A General Coarse-to-Fine M
 
 ```
 ## Requirements
-- python 3.9.7
-- pytorch 1.10.1
-- torchvision 0.11.2
-- apex 
+- python 3.10+
+- pytorch 2.2+
+- torchvision 0.17+
+- apex (optional for mixed precision)
+
+Quickstart (choose one):
+
+1) Pip (CPU by default)
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt
+PYTHONPATH=. python dynamic_inference.py -h
+```
+
+2) Conda/Mamba
+
+```
+mamba env create -f environment.yml
+conda activate cf-vit
+PYTHONPATH=. python dynamic_inference.py -h
+```
+
+3) Docker (CPU)
+
+```
+docker build -t cf-vit:cpu .
+docker run --rm -it -v $PWD:/app cf-vit:cpu python dynamic_inference.py -h
+```
 
 
 ## Data Preparation
@@ -46,26 +73,26 @@ ImageNet
 ## Evaluate Pre-trained Models
 - Get accuracy of each stage
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 0 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 0 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
 
 ```
 
 - Infer the model on the validation set with various threshold([0.01:1:0.01])
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 1 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 1 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
 
 ```
 
 - Infer the model on the validation set with one threshold and meature the throughput
 
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 2 --data_url PATH_TO_IMAGENET  --batch_size 1024 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} --threshold THRESHOLD
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 2 --data_url PATH_TO_IMAGENET  --batch_size 1024 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} --threshold THRESHOLD
 
 ```
 
 - Read the evaluation results saved in pre-trained models
 ```
-CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 3 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
+CUDA_VISIBLE_DEVICES=0 python dynamic_inference.py --eval-mode 3 --data_url PATH_TO_IMAGENET  --batch_size 64 --model {cf_deit_small, cf_deit_small_plus, cf_lvvit_small} --checkpoint_path PATH_TO_CHECKPOINT  --coarse-stage-size {7,9} 
 
 ```
 
