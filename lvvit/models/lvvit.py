@@ -90,7 +90,7 @@ class CF_LV_ViT(nn.Module):
                  skip_lam = 1.0,order=None, mix_token=False, return_dense=False):
         super().__init__()
 
-        self.informative_selection = False
+        self.informative_selection = True
         self.alpha = 0.5
         self.beta_2 = 0.99
         self.target_index = [3,4,5,6,7,8,9,10,11,12,13,14,15]
@@ -145,6 +145,10 @@ class CF_LV_ViT(nn.Module):
                 norm_layer(embed_dim),
                 Mlp(in_features=embed_dim, hidden_features=int(mlp_ratio*embed_dim),out_features=embed_dim,act_layer=nn.GELU,drop=drop_rate)
             ) 
+
+        # ITI and CFI modules following the provided framework
+        self.iti = ITIModule(informative_ratio=self.alpha)
+        self.cfi = CFIModule(embed_dim=self.embed_dim)
 
         for pos_embed in self.pos_embed_list:
             trunc_normal_(pos_embed, std=.02)
@@ -251,7 +255,8 @@ class CF_LV_ViT(nn.Module):
             for blk in self.blocks:
                 x,_ = blk(x)
             x = self.norm(x)
-            x_cls = self.head(x[:,0])
+            fused_cls = self.cfi(self.first_stage_output[:,0], x[:,1:])
+            x_cls = self.head(fused_cls)
 
             if self.return_dense:
                 x_aux = self.aux_head(x[:,1:])
@@ -269,11 +274,13 @@ class CF_LV_ViT(nn.Module):
             else:
                 results.append(x_cls)
         else:
-            cls_attn = global_attention.mean(dim=1)[:,0,1:]
-            import_token_num = math.ceil(self.alpha * self.patch_embed.num_patches_list[0])
-            policy_index = torch.argsort(cls_attn, dim=1, descending=True)
-            patch_unimportan_index = policy_index[:, import_token_num:]
-            important_index = policy_index[:, :import_token_num]
+            important_index, _ = self.iti(global_attention, self.patch_embed.num_patches_list[0], self.patches_h_list[0])
+            import_token_num = important_index.size(1)
+            # derive unimportant by complement
+            all_idx = torch.arange(self.patch_embed.num_patches_list[0], device=important_index.device).unsqueeze(0).repeat(B,1)
+            mask = torch.zeros_like(all_idx, dtype=torch.bool)
+            mask.scatter_(1, important_index, True)
+            patch_unimportan_index = all_idx.masked_select(~mask).view(B, -1)
             unimportan_tokens = batch_index_select(embedding_coarse, patch_unimportan_index+1)
             patch_important_index = get_index(important_index,image_size=self.img_size_list[1])
             cls_index = torch.zeros((B,1)).cuda().long()
@@ -283,7 +290,8 @@ class CF_LV_ViT(nn.Module):
             for blk in self.blocks:
                 x,_ = blk(x)
             x = self.norm(x)
-            x_cls = self.head(x[:,0])
+            fused_cls = self.cfi(self.first_stage_output[:,0], x[:,1:])
+            x_cls = self.head(fused_cls)
 
             if self.return_dense:
                 x_aux = self.aux_head(x[:,1:])

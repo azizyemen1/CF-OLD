@@ -147,6 +147,72 @@ class MultiResoPatchEmbed4_2(nn.Module):
     
 
 
+class ITIModule(nn.Module):
+    """
+    Informative Tokens Identification (ITI)
+    - Consumes attention maps from the coarse-level transformer
+    - Produces indices of informative tokens and an attention heatmap
+    """
+    def __init__(self, informative_ratio: float = 0.5, with_heatmap: bool = True):
+        super().__init__()
+        assert 0.0 < informative_ratio <= 1.0
+        self.informative_ratio = informative_ratio
+        self.with_heatmap = with_heatmap
+
+    def forward(self, attn: torch.Tensor, num_patches: int, grid_size: int):
+        """
+        Args:
+            attn: [B, heads, N, N] attention of one or aggregated layers
+            num_patches: number of spatial tokens (exclude cls)
+            grid_size: sqrt(num_patches)
+        Returns:
+            important_idx: [B, K] indices of informative tokens (0..num_patches-1)
+            heatmap: [B, grid_size, grid_size] averaged attention to CLS (optional)
+        """
+        # mean over heads and take attention from CLS to others
+        cls_attn = attn.mean(dim=1)[:, 0, 1:1 + num_patches]  # [B, num_patches]
+        k = max(1, math.ceil(self.informative_ratio * num_patches))
+        sorted_idx = torch.argsort(cls_attn, dim=1, descending=True)
+        important_idx = sorted_idx[:, :k]
+        if self.with_heatmap:
+            heatmap = cls_attn.view(attn.size(0), grid_size, grid_size)
+            return important_idx, heatmap
+        return important_idx, None
+
+
+class CFIModule(nn.Module):
+    """
+    Coarse-Fine Interaction (CFI)
+    - Uses coarse CLS token as a query to aggregate information from fine tokens
+    - Returns fused CLS token and optionally updated tokens
+    """
+    def __init__(self, embed_dim: int):
+        super().__init__()
+        self.query_proj = nn.Linear(embed_dim, embed_dim)
+        self.key_proj = nn.Linear(embed_dim, embed_dim)
+        self.value_proj = nn.Linear(embed_dim, embed_dim)
+        self.scale = (embed_dim ** -0.5)
+        self.norm = nn.LayerNorm(embed_dim)
+        self.fuse = Mlp(in_features=embed_dim * 2, hidden_features=embed_dim * 2, out_features=embed_dim)
+
+    def forward(self, coarse_cls: torch.Tensor, fine_tokens: torch.Tensor):
+        """
+        Args:
+            coarse_cls: [B, C]
+            fine_tokens: [B, N, C] including or excluding fine CLS; treated uniformly
+        Returns:
+            fused_cls: [B, C]
+        """
+        q = self.query_proj(coarse_cls).unsqueeze(1)  # [B,1,C]
+        k = self.key_proj(fine_tokens)                # [B,N,C]
+        v = self.value_proj(fine_tokens)              # [B,N,C]
+        attn = torch.matmul(q, k.transpose(1, 2)) * self.scale  # [B,1,N]
+        attn = F.softmax(attn, dim=-1)
+        context = torch.matmul(attn, v).squeeze(1)  # [B,C]
+        fused = torch.cat([self.norm(coarse_cls), context], dim=-1)
+        fused_cls = self.fuse(fused)
+        return fused_cls
+
 
 class Block(nn.Module):
     '''
